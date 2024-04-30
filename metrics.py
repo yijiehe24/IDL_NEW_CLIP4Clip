@@ -6,21 +6,55 @@ from __future__ import print_function
 import numpy as np
 import torch
 
+# def compute_metrics(x):
+#     sx = np.sort(-x, axis=1)
+#     d = np.diag(-x)
+#     d = d[:, np.newaxis]
+#     ind = sx - d
+#     ind = np.where(ind == 0)
+#     ind = ind[1]
+#     metrics = {}
+#     metrics['R1'] = float(np.sum(ind == 0)) * 100 / len(ind)
+#     metrics['R5'] = float(np.sum(ind < 5)) * 100 / len(ind)
+#     metrics['R10'] = float(np.sum(ind < 10)) * 100 / len(ind)
+#     metrics['MR'] = np.median(ind) + 1
+#     metrics["MedianR"] = metrics['MR']
+#     metrics["MeanR"] = np.mean(ind) + 1
+#     metrics["cols"] = [int(i) for i in list(ind)]
+#     return metrics
+
 def compute_metrics(x):
-    sx = np.sort(-x, axis=1)
-    d = np.diag(-x)
+    '''
+    Takes matrix x and sorts it along each row in descending order so most similar items are first.
+    Then extract the diagonal of matrix (which represents the similarity of item with itself) and reshape into a 2D column vector.
+    Then compute the difference between each sorted similarity score and the diagonal to find positions of diagonal elements in sorted array and get rankings.
+    Keep only top 15 highest rankings for each row
+    Calculates metrics based on rankings:
+    - R@K for K=1, 5, 10: % of items ranking within top K positions
+    - MR = Median of ranking positions; MeanR = Mean ranking position
+    '''
+    sorted_x = np.sort(-x, axis=1)
+    sorted_idx = np.argsort(-x, axis=1)
+    top15_idx = np.argsort(-x, axis=1)[:, :15]
+
+    d = np.diag(x)
     d = d[:, np.newaxis]
-    ind = sx - d
-    ind = np.where(ind == 0)
-    ind = ind[1]
-    metrics = {}
-    metrics['R1'] = float(np.sum(ind == 0)) * 100 / len(ind)
-    metrics['R5'] = float(np.sum(ind < 5)) * 100 / len(ind)
-    metrics['R10'] = float(np.sum(ind < 10)) * 100 / len(ind)
-    metrics['MR'] = np.median(ind) + 1
-    metrics["MedianR"] = metrics['MR']
-    metrics["MeanR"] = np.mean(ind) + 1
-    metrics["cols"] = [int(i) for i in list(ind)]
+
+    ind = np.zeros_like(d).flatten()
+
+    for i in range(x.shape[0]):
+        ind[i] = np.where(sorted_idx[i] == i)[0][0]
+
+    top15 = {i: [(idx, x[i, idx]) for idx in top15_idx[i]] for i in range(x.shape[0])}
+
+    metrics = {
+        'R1': float(np.sum(ind == 0)) * 100 / len(ind),
+        'R5': float(np.sum(ind < 5)) * 100 / len(ind),
+        'R10': float(np.sum(ind < 10)) * 100 / len(ind),
+        'MeanR': np.mean(ind) + 1,
+        'MR': np.median(ind) + 1,
+        'Top15': top15
+    }
     return metrics
 
 def print_computed_metrics(metrics):
@@ -29,6 +63,8 @@ def print_computed_metrics(metrics):
     r10 = metrics['R10']
     mr = metrics['MR']
     print('R@1: {:.4f} - R@5: {:.4f} - R@10: {:.4f} - Median R: {}'.format(r1, r5, r10, mr))
+    for key, value in metrics['Top15'].items():
+      print(f"Row {key}: {value}")
 
 # below two functions directly come from: https://github.com/Deferf/Experiments
 def tensor_text_to_video_metrics(sim_tensor, top_k = [1,5,10]):
