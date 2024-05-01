@@ -12,6 +12,8 @@ from modules.module_cross import CrossModel, CrossConfig, Transformer as Transfo
 
 from modules.module_clip import CLIP, convert_weights
 from torch.nn.utils.rnn import pad_packed_sequence, pack_padded_sequence
+from metrics import compute_metrics, tensor_text_to_video_metrics, tensor_video_to_text_sim
+
 
 logger = logging.getLogger(__name__)
 allgather = AllGather.apply
@@ -83,7 +85,7 @@ class CLIP4ClipPreTrainedModel(PreTrainedModel, nn.Module):
 
                 state_dict["clip.visual.conv2.weight"] = cp_weight
 
-        if model.sim_header == 'tightTransf':
+        if model.sim_header == 'tightTransf' or model.sim_header == 'mix':
             contain_cross = False
             for key in state_dict.keys():
                 if key.find("cross.transformer") > -1:
@@ -265,6 +267,30 @@ class CLIP4Clip(CLIP4ClipPreTrainedModel):
             loss = 0.
             sim_matrix, *_tmp = self.get_similarity_logits(sequence_output, visual_output, attention_mask, video_mask,
                                                     shaped=True, loose_type=self.loose_type)
+            
+            if self.sim_header == 'mix': 
+                # get all matrix from similaity matrix
+                tv_metrics = compute_metrics(sim_matrix)
+                vt_metrics = compute_metrics(sim_matrix.T)
+                
+                # find top 15 
+                tv_top15 = tv_metrics["Top15"]
+                vt_top15 = vt_metrics["Top15"]
+                
+                # retrieve embedding with proper attention mask and video mask
+                new_attention = []
+                new_video = []
+                for i in range(15): 
+                    new_attention.append(attention_mask[:, tv_top15[i], :])
+                    new_video.append(video_mask[:, vt_top15[i], :])
+                sequence_output = self.get_sequence_output(tv_top15, token_type_ids, new_attention, shaped=True)
+                visual_output = self.get_visual_output(vt_top15, new_video, shaped=True, video_frame=video_frame)
+                
+                # calculate cross_similairty
+                sim_matrix2, *_tmp = self.get_similarity_logits(sequence_output, visual_output, attention_mask, video_mask,
+                                                             shaped=True, loose_type=True)
+                sim_matrix += sim_matrix2   
+
             sim_loss1 = self.loss_fct(sim_matrix)
             sim_loss2 = self.loss_fct(sim_matrix.T)
             sim_loss = (sim_loss1 + sim_loss2) / 2
@@ -401,6 +427,7 @@ class CLIP4Clip(CLIP4ClipPreTrainedModel):
         return retrieve_logits
 
     def _cross_similarity(self, sequence_output, visual_output, attention_mask, video_mask):
+        
         sequence_output, visual_output = sequence_output.contiguous(), visual_output.contiguous()
 
         b_text, s_text, h_text = sequence_output.size()
@@ -442,6 +469,7 @@ class CLIP4Clip(CLIP4ClipPreTrainedModel):
 
         retrieve_logits = torch.cat(retrieve_logits_list, dim=0)
         return retrieve_logits
+        
 
     def get_similarity_logits(self, sequence_output, visual_output, attention_mask, video_mask, shaped=False, loose_type=False):
         if shaped is False:
@@ -450,10 +478,16 @@ class CLIP4Clip(CLIP4ClipPreTrainedModel):
 
         contrastive_direction = ()
         if loose_type:
-            assert self.sim_header in ["meanP", "seqLSTM", "seqTransf"]
+            assert self.sim_header in ["meanP", "seqLSTM", "seqTransf", "mix"]
             retrieve_logits = self._loose_similarity(sequence_output, visual_output, attention_mask, video_mask, sim_header=self.sim_header)
+            
+            # update loose type since need to call again later. 
+            if self.sim_header == 'mix': 
+                self.loose_type = False
         else:
-            assert self.sim_header in ["tightTransf"]
-            retrieve_logits = self._cross_similarity(sequence_output, visual_output, attention_mask, video_mask, )
+            assert self.sim_header in ["tightTransf", "mix"] 
+            retrieve_logits = self._cross_similarity(sequence_output, visual_output, attention_mask, video_mask )
+
+        
 
         return retrieve_logits, contrastive_direction

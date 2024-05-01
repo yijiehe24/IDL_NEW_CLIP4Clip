@@ -221,3 +221,4 @@ class CrossModel(PreTrainedModel):
         pooled_output = self.pooler(embedding_output, hidden_mask=attention_mask)
 
         return embedding_output, pooled_output
+

@@ -83,3 +83,4 @@ if __name__ == "__main__":
             if os.path.exists(output_video_path) is False or os.path.getsize(output_video_path) < 1.:
                 shutil.copyfile(input_video_path, output_video_path)
                 print("Copy and replace file: {}".format(output_video_path))
+                

@@ -35,6 +35,8 @@ def bytes_to_unicode():
     return dict(zip(bs, cs))
 
 
+
+
 def get_pairs(word):
     """Return set of symbol pairs in a word.
     Word is represented as tuple of symbols (symbols being variable-length strings).

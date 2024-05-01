@@ -99,14 +99,14 @@ def get_args(description='CLIP4Clip on Retrieval Task'):
     parser.add_argument('--linear_patch', type=str, default="2d", choices=["2d", "3d"],
                         help="linear projection of flattened patches.")
     parser.add_argument('--sim_header', type=str, default="meanP",
-                        choices=["meanP", "seqLSTM", "seqTransf", "tightTransf"],
+                        choices=["meanP", "seqLSTM", "seqTransf", "tightTransf", "mix"],
                         help="choice a similarity header.")
 
     parser.add_argument("--pretrained_clip_name", default="ViT-B/32", type=str, help="Choose a CLIP version")
 
     args = parser.parse_args()
 
-    if args.sim_header == "tightTransf":
+    if args.sim_header == "tightTransf" or args.sim_header == "mix":
         args.loose_type = False
 
     # Check paramenters
@@ -316,6 +316,35 @@ def _run_on_single_gpu(model, batch_list_t, batch_list_v, batch_sequence_output_
             each_row.append(b1b2_logits)
         each_row = np.concatenate(tuple(each_row), axis=-1)
         sim_matrix.append(each_row)
+    
+        if model.sim_header == 'mix': 
+            # get all matrix from similaity matrix
+            tv_metrics = compute_metrics(sim_matrix)
+            vt_metrics = compute_metrics(sim_matrix.T)
+            
+            # find top 15 
+            tv_top15 = tv_metrics["Top15"]
+            vt_top15 = vt_metrics["Top15"]
+            
+            # retrieve embedding with proper attention mask and video mask
+            new_attention = []
+            new_video = []
+            for i in range(15): 
+                new_attention.append(input_mask[:, tv_top15[i], :])
+                new_video.append(video_mask[:, vt_top15[i], :])
+            sequence_output = []
+            visual_output = []
+            for i in range(15): 
+                sequence_output.append(batch_sequence_output_list[:, tv_top15[i]]) 
+                visual_output.append(batch_sequence_output_list[:, vt_top15[i]]) 
+            
+            # calculate cross_similairty
+            sim_matrix2, *_tmp = model.get_similarity_logits(sequence_output, visual_output, input_mask, video_mask,
+                                                                     loose_type=True)
+            
+            # Sum up the matrix
+            sim_matrix += sim_matrix2   
+
     return sim_matrix
 
 def eval_epoch(args, model, test_dataloader, device, n_gpu):
@@ -449,6 +478,14 @@ def eval_epoch(args, model, test_dataloader, device, n_gpu):
         vt_metrics = compute_metrics(sim_matrix.T)
         logger.info('\t Length-T: {}, Length-V:{}'.format(len(sim_matrix), len(sim_matrix[0])))
 
+
+    # Run again if mix type
+    if args.sim_header == 'mix': 
+        tv_top15 = tv_metrics["Top15"]
+        vt_top15 = vt_metrics["Top15"]
+        
+    
+
     logger.info("Text-to-Video:")
     logger.info('\t>>>  R@1: {:.1f} - R@5: {:.1f} - R@10: {:.1f} - Median R: {:.1f} - Mean R: {:.1f}'.
                 format(tv_metrics['R1'], tv_metrics['R5'], tv_metrics['R10'], tv_metrics['MR'], tv_metrics['MeanR']))
@@ -562,6 +599,7 @@ def main():
                 ## Run on val dataset, this process is *TIME-consuming*.
                 # logger.info("Eval on val dataset")
                 # R1 = eval_epoch(args, model, val_dataloader, device, n_gpu)
+
 
                 R1 = eval_epoch(args, model, test_dataloader, device, n_gpu)
                 if best_score <= R1:
