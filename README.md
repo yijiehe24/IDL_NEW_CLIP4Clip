@@ -2,7 +2,7 @@
 
 New_CLIP4Clip is a video-text retrieval model based on  [CLIP4Clip](https://github.com/ArrowLuo/CLIP4Clip). We investigate three similarity calculation approaches: parameter-free type, sequential type, and tight type, in this work. The model achieve SOTA results on MSR-VTT, MSVD, LSMDC, ActivityNet, and DiDeMo.
 
-![New_CLIP4Clip](New_CLIP4Clip.png)
+![New_CLIP4Clip](New_CLIP4Clip.jpg)
 
 ## Requirement
 ```sh
